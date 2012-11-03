@@ -1,0 +1,11 @@
+Maven testing with Pig Unit:
+
+1.  Build Pig Unit:
+
+cd /path/to/pig/distro
+ant pigunit-jar
+
+2.  Install Pig Unit to local Maven repo:
+
+mvn install:install-file -Dfile=/path/to/pigunit.jar -DgroupId=org.apache.pig \
+	-DartifactId=pigunit -Dversion=0.10.0 -Dpackaging=jar
