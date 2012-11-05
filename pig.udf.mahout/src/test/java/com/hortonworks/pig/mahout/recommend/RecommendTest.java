@@ -17,7 +17,7 @@ public class RecommendTest {
 				"users_file=src/test/resources/users.dat",
 				"ratings_file=src/test/resources/ratings.dat"};
 		PigTest test = new PigTest(
-				"src/test/resources/scripts/single-user-recommendation.pig",
+				"src/test/pig/single-user-recommendation.pig",
 				params);
 
 		test.unoverride("STORE");
