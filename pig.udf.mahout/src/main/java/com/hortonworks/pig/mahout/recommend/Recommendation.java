@@ -13,24 +13,31 @@ import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
-import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
+import org.apache.pig.impl.util.Utils;
 
 public class Recommendation extends EvalFunc<DataBag> implements Algebraic {
 
 	private static BagFactory bagFactory = BagFactory.getInstance();
 	private static TupleFactory tupleFactory = TupleFactory.getInstance();
-	private static long userID = 6040;
+	private static long userID;
 	private static int howMany = 10;
+
+	public Recommendation(String userID) {
+		this.userID = Long.parseLong(userID);
+	}
+
+	public Recommendation() {
+	}
 
 	@Override
 	public DataBag exec(Tuple record) throws IOException {
 		DataBag bag = bagFactory.newDefaultBag();
 		bag.add(record);
 		try {
-			return recommend(bag);
+			return recommend(this.userID, bag);
 		} catch (TasteException e) {
 			String msg = "Error while computing recommendations in "
 					+ this.getClass().getSimpleName();
@@ -52,6 +59,15 @@ public class Recommendation extends EvalFunc<DataBag> implements Algebraic {
 
 	static public class Initial extends EvalFunc<Tuple> {
 
+		private String initialUserID;
+
+		public Initial() {
+		}
+
+		public Initial(String userID) {
+			initialUserID = userID;
+		}
+
 		@Override
 		public Tuple exec(Tuple input) throws IOException {
 			DataBag bag = (DataBag) input.get(0);
@@ -64,14 +80,23 @@ public class Recommendation extends EvalFunc<DataBag> implements Algebraic {
 
 	static public class Intermediate extends EvalFunc<Tuple> {
 
+		private String intermediateUserID;
+
+		public Intermediate() {
+		}
+
+		public Intermediate(String userID) {
+			intermediateUserID = userID;
+		}
+
 		@Override
 		public Tuple exec(Tuple input) throws IOException {
 			DataBag bag = (DataBag) input.get(0);
+			Tuple tuple = tupleFactory.newTuple(1);
 			DataBag intermediateBag = bagFactory.newDefaultBag();
 			for (Iterator<Tuple> i = bag.iterator(); i.hasNext();) {
 				intermediateBag.add(i.next());
 			}
-			Tuple tuple = tupleFactory.newTuple(1);
 			tuple.set(0, intermediateBag);
 			return tuple;
 		}
@@ -79,11 +104,20 @@ public class Recommendation extends EvalFunc<DataBag> implements Algebraic {
 
 	static public class Final extends EvalFunc<DataBag> {
 
+		private String finalUserID;
+
+		public Final() {
+		}
+
+		public Final(String userID) {
+			finalUserID = userID;
+		}
+
 		@Override
 		public DataBag exec(Tuple input) throws IOException {
 			try {
-				return recommend(unwrapFinalBag(input,
-						bagFactory.newDefaultBag()));
+				return recommend(Long.parseLong(finalUserID),
+						unwrapBag(input, bagFactory.newDefaultBag()));
 			} catch (TasteException e) {
 				String msg = "Error while computing recommendations in "
 						+ this.getClass().getSimpleName();
@@ -92,7 +126,7 @@ public class Recommendation extends EvalFunc<DataBag> implements Algebraic {
 		}
 	}
 
-	private static DataBag unwrapFinalBag(Tuple input, DataBag finalBag)
+	private static DataBag unwrapBag(Tuple input, DataBag finalBag)
 			throws ExecException {
 
 		Object elem = input.get(0);
@@ -102,38 +136,49 @@ public class Recommendation extends EvalFunc<DataBag> implements Algebraic {
 				Tuple nestedTuple = i.next();
 				for (Object field : nestedTuple.getAll()) {
 					if (field instanceof DataBag) {
-						unwrapFinalBag(nestedTuple, finalBag);
+						unwrapBag(nestedTuple, finalBag);
 					} else {
 						finalBag.add(nestedTuple);
 					}
 				}
+
 			}
 		}
 
 		return finalBag;
 	}
 
-	private static DataBag recommend(DataBag bag) throws ExecException,
-			TasteException {
+	private static DataBag recommend(Long userID, DataBag bag)
+			throws ExecException, TasteException {
 		DataModel model = new BagDataModel(bag);
 		GenericRecommender recommender = new GenericRecommender(model);
-		List<RecommendedItem> recommendations = recommender.recommend(userID,
+		List<RecommendedItem> recommendedItems = recommender.recommend(userID,
 				howMany);
-
 		DataBag recommendationsBag = bagFactory.newDefaultBag();
-		for (RecommendedItem recommendation : recommendations) {
-			Tuple tuple = tupleFactory.newTuple(2);
-			tuple.set(0, recommendation.getItemID());
-			tuple.set(1, recommendation.getValue());
-			recommendationsBag.add(tuple);
+		Tuple recommendations = tupleFactory.newTuple(2);
+		recommendations.set(0, userID);
+		DataBag recommendedItemsBag = bagFactory.newDefaultBag();
+		for (RecommendedItem recommendedItem : recommendedItems) {
+			Tuple recommendedItemTuple = tupleFactory.newTuple(2);
+			recommendedItemTuple.set(0, recommendedItem.getItemID());
+			recommendedItemTuple.set(1,
+					((Float) recommendedItem.getValue()).intValue());
+			recommendedItemsBag.add(recommendedItemTuple);
 		}
+		recommendations.set(1, recommendedItemsBag);
+		recommendationsBag.add(recommendations);
 		return recommendationsBag;
 	}
 
 	public Schema outputSchema(Schema input) {
-		Schema tupleSchema = new Schema();
-		tupleSchema.add(new Schema.FieldSchema(null, DataType.LONG));
-		tupleSchema.add(new Schema.FieldSchema(null, DataType.FLOAT));
-		return tupleSchema;
+		try {
+			String schemaString = "all_recommendations:bag{user_recommendations:tuple(user:long, recommendation:bag{recommended_item:tuple(item:int, value:int)})}";
+			return Utils.getSchemaFromString(schemaString);
+		} catch (Exception e) {
+			String msg = "Error while parsing output schema "
+					+ this.getClass().getSimpleName();
+			log.error(msg, e);
+			return null;
+		}
 	}
 }
